@@ -20,24 +20,25 @@ public:
 	virtual int tts(const char* src_text, const char* des_path) override;
 
 public slots:
-	bool slotReadyRead();
+	//bool slotReadyRead();
 
-	bool getAuthToken(QByteArray &sReply);
+	bool getAuthToken(const QByteArray &sReply);
 
-	bool slotError(QNetworkReply::NetworkError code);
-	bool slotSslErrors(const QList<QSslError> &errors);
-	bool replyFinished(QNetworkReply*);
+	//bool slotError(QNetworkReply::NetworkError code);
+	//bool slotSslErrors(const QList<QSslError> &errors);
+	//bool replyFinished(QNetworkReply*);
+	bool loadAuthFromCache();
 private:
 
 	static const QString m_sOAuthUrl;
 	static const QString m_sTTSGetUrl;
+	static const QString m_sConfigFile;
 
 	QNetworkAccessManager *m_manager;
 
 	QString m_sAppid;
 	QString m_sAPIKey;
 	QString m_sSecretKey;
-	bool m_bPassedAuth;
 	QString m_sToken;
 
 	enum EState {

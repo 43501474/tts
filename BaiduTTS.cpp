@@ -6,6 +6,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <fstream>
+#include "QFile"
+#include "QEventLoop"
 
 using namespace std;
 
@@ -13,18 +15,20 @@ const QString BaiduTTS::m_sOAuthUrl("https://openapi.baidu.com/oauth/2.0/token?g
 
 const QString BaiduTTS::m_sTTSGetUrl("http://tsn.baidu.com/text2audio?tex=%1&lan=zh&cuid=%2&ctp=1&tok=%3");
 
+const QString BaiduTTS::m_sConfigFile("./baidu_tts.config");
+
 BaiduTTS::BaiduTTS()
 	: m_sAppid("7739437")
 	, m_sAPIKey("SDLeGToa0DIzrOVgqGgr47je")
 	, m_sSecretKey("2642e0ebdfd8df5580d68c63626c1778")
-	, m_bPassedAuth(false)
 	, m_manager(new QNetworkAccessManager(nullptr))
 	, m_nState(NEED_AUTH)
 	, m_srcTest(nullptr)
 	, m_desPath(nullptr)
 	, m_pOfstream(nullptr)
 {
-	connect(m_manager, SIGNAL(finished(QNetworkReply*)), this, SLOT(replyFinished(QNetworkReply*)));
+	if (!loadAuthFromCache())
+		doAuth();
 }
 
 BaiduTTS::~BaiduTTS()
@@ -35,23 +39,31 @@ BaiduTTS::~BaiduTTS()
 
 int BaiduTTS::doAuth()
 {
+	QEventLoop eventLoop;
 	QString sOAuthReqUrl = m_sOAuthUrl.arg(m_sAPIKey).arg(m_sSecretKey);
 
 	QNetworkRequest request;
 	request.setUrl(QUrl(sOAuthReqUrl));
 
-	QNetworkReply *reply = m_manager->get(request);
-	connect(reply, SIGNAL(readyRead()), this, SLOT(slotReadyRead()));
-	connect(reply, SIGNAL(error(QNetworkReply::NetworkError)),
-		this, SLOT(slotError(QNetworkReply::NetworkError)));
-	connect(reply, SIGNAL(sslErrors(QList<QSslError>)),
-		this, SLOT(slotSslErrors(QList<QSslError>)));
-	// reply->deleteLater();
+	connect(m_manager, SIGNAL(finished(QNetworkReply *)), &eventLoop, SLOT(quit()));
+	QNetworkReply *pReply = m_manager->get(request);	
+	eventLoop.exec();
+
+	QByteArray baReply = pReply->readAll();
+	if (!getAuthToken(baReply))
+		return -1;
+
+	ofstream out(m_sConfigFile.toStdString(), ofstream::binary | ofstream::out);
+	out.write(baReply.data(), baReply.length());
+	pReply->deleteLater();
 	return 0;
 }
 
 int BaiduTTS::tts(const char* src_text, const char* des_path)
 {
+	if (m_nState != AUTH_PASSED)
+		return -1;
+
 	m_srcTest = src_text;
 	m_desPath = des_path;
 
@@ -59,73 +71,103 @@ int BaiduTTS::tts(const char* src_text, const char* des_path)
 	if (!*m_pOfstream)
 		return -1;
 
-	if (m_bPassedAuth == false && doAuth())
+	QEventLoop evtLoop;
+	connect(m_manager, SIGNAL(finished(QNetworkReply*)), &evtLoop, SLOT(quit()));
+
+	QString sText = QString::fromLocal8Bit(src_text);
+	QString sOAuthReqUrl = m_sTTSGetUrl.arg(sText.toUtf8().toPercentEncoding().constData()).arg("009923").arg(m_sToken);
+
+	QNetworkRequest request;
+	request.setUrl(QUrl(sOAuthReqUrl));
+	QNetworkReply *pReply = m_manager->get(request);
+	evtLoop.exec();
+
+	QByteArray baReply = pReply->readAll();
+	bool bContainValidHeader = false;
+	QList<QNetworkReply::RawHeaderPair> lstRHP = pReply->rawHeaderPairs();
+	for (QNetworkReply::RawHeaderPair p : lstRHP)
+	{
+		if (p.first == "Content-type" && p.second.contains("mp3"))
+		{
+			m_pOfstream->seekp(0, fstream::end);
+			m_pOfstream->write(baReply.data(), baReply.length());
+			bContainValidHeader = true;
+		}
+	}
+
+	if (!bContainValidHeader)
+	{
+		qDebug() << "Header indicate Err";
+		qDebug() << pReply->rawHeaderList();
+		qDebug() << baReply;
 		return -1;
+	}
+	pReply->deleteLater();
 
 	return 0;
 }
 
-bool BaiduTTS::slotReadyRead()
-{
-	qDebug() << "BaiduTTS::slotReadyRead";
-	
-	QNetworkReply* pReplay = dynamic_cast<QNetworkReply*>(sender());
-	if (pReplay)
-	{
-		QByteArray baReply = pReplay->readAll();
-		if (m_nState == NEED_AUTH)
-		{
-			getAuthToken(baReply);
+//bool BaiduTTS::slotReadyRead()
+//{
+//	qDebug() << "BaiduTTS::slotReadyRead";
+//	
+//	QNetworkReply* pReplay = dynamic_cast<QNetworkReply*>(sender());
+//	if (pReplay)
+//	{
+//		QByteArray baReply = pReplay->readAll();
+//		if (m_nState == NEED_AUTH)
+//		{
+//			getAuthToken(baReply);
+//
+//			if (m_sToken.isEmpty())
+//				return false;
+//
+//			QString sText = QString::fromLocal8Bit("¶ËÎç½Ú³ÔôÕ×Ó");
+//			QString sOAuthReqUrl = m_sTTSGetUrl.arg(sText.toUtf8().toPercentEncoding().constData()).arg("009923").arg(m_sToken);
+//
+//			QNetworkRequest request;
+//			request.setUrl(QUrl(sOAuthReqUrl));
+//			QNetworkReply *reply = m_manager->get(request);
+//			m_nState = TTS_REQ;
+//			connect(reply, SIGNAL(readyRead()), this, SLOT(slotReadyRead()));
+//			connect(reply, SIGNAL(error(QNetworkReply::NetworkError)),
+//				this, SLOT(slotError(QNetworkReply::NetworkError)));
+//			connect(reply, SIGNAL(sslErrors(QList<QSslError>)),
+//				this, SLOT(slotSslErrors(QList<QSslError>)));
+//		}
+//		else if (m_nState == TTS_REQ)
+//		{
+//			bool bContainValidHeader = false;
+//			QList<QNetworkReply::RawHeaderPair> lstRHP = pReplay->rawHeaderPairs();
+//			for (QNetworkReply::RawHeaderPair p : lstRHP)
+//			{
+//				if (p.first == "Content-type" && p.second.contains("mp3"))
+//				{
+//					m_pOfstream->seekp(0, fstream::end);
+//					m_pOfstream->write(baReply.data(), baReply.length());
+//					bContainValidHeader = true;
+//				}
+//			}
+//
+//			if (!bContainValidHeader)
+//			{
+//				qDebug() << "Header indicate Err";
+//				qDebug() << pReplay->rawHeaderList();
+//				qDebug() << baReply;
+//				return false;
+//			}
+//		}
+//	}
+//	else
+//	{
+//		qDebug() << "sender isn't QNetworkReply";
+//		return false;
+//	}
+//		
+//	return true;
+//}
 
-			if (m_sToken.isEmpty())
-				return false;
-
-			QString sText = QString::fromLocal8Bit("¶ËÎç½Ú³ÔôÕ×Ó");
-			QString sOAuthReqUrl = m_sTTSGetUrl.arg(sText.toUtf8().toPercentEncoding().constData()).arg("009923").arg(m_sToken);
-
-			QNetworkRequest request;
-			request.setUrl(QUrl(sOAuthReqUrl));
-			QNetworkReply *reply = m_manager->get(request);
-			m_nState = TTS_REQ;
-			connect(reply, SIGNAL(readyRead()), this, SLOT(slotReadyRead()));
-			connect(reply, SIGNAL(error(QNetworkReply::NetworkError)),
-				this, SLOT(slotError(QNetworkReply::NetworkError)));
-			connect(reply, SIGNAL(sslErrors(QList<QSslError>)),
-				this, SLOT(slotSslErrors(QList<QSslError>)));
-		}
-		else if (m_nState == TTS_REQ)
-		{
-			bool bContainValidHeader = false;
-			QList<QNetworkReply::RawHeaderPair> lstRHP = pReplay->rawHeaderPairs();
-			for (QNetworkReply::RawHeaderPair p : lstRHP)
-			{
-				if (p.first == "Content-type" && p.second.contains("mp3"))
-				{
-					m_pOfstream->seekp(0, fstream::end);
-					m_pOfstream->write(baReply.data(), baReply.length());
-					bContainValidHeader = true;
-				}
-			}
-
-			if (!bContainValidHeader)
-			{
-				qDebug() << "Header indicate Err";
-				qDebug() << pReplay->rawHeaderList();
-				qDebug() << baReply;
-				return false;
-			}
-		}
-	}
-	else
-	{
-		qDebug() << "sender isn't QNetworkReply";
-		return false;
-	}
-		
-	return true;
-}
-
-bool BaiduTTS::getAuthToken(QByteArray &baReply)
+bool BaiduTTS::getAuthToken(const QByteArray &baReply)
 {
 	qDebug() << baReply;
 
@@ -161,21 +203,31 @@ bool BaiduTTS::getAuthToken(QByteArray &baReply)
 	return true;
 }
 
-bool BaiduTTS::slotError(QNetworkReply::NetworkError code)
-{
-	qDebug() << "BaiduTTS::slotError" << code;
-	return true;
-}
+//bool BaiduTTS::slotError(QNetworkReply::NetworkError code)
+//{
+//	qDebug() << "BaiduTTS::slotError" << code;
+//	return true;
+//}
+//
+//bool BaiduTTS::slotSslErrors(const QList<QSslError> &errors)
+//{
+//	qDebug() << "BaiduTTS::slotSslErrors";
+//	return true;
+//}
+//
+//bool BaiduTTS::replyFinished(QNetworkReply*)
+//{
+//	qDebug() << "BaiduTTS::replyFinished";
+//	return true;
+//}
 
-bool BaiduTTS::slotSslErrors(const QList<QSslError> &errors)
+bool BaiduTTS::loadAuthFromCache()
 {
-	qDebug() << "BaiduTTS::slotSslErrors";
-	return true;
-}
+	ifstream in(m_sConfigFile.toStdString(), ifstream::binary|ifstream::in);
+	if (!in)
+		return false;
 
-bool BaiduTTS::replyFinished(QNetworkReply*)
-{
-	qDebug() << "BaiduTTS::replyFinished";
-	return true;
+	std::string str((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+	return getAuthToken(QByteArray::fromStdString(str));
 }
 
