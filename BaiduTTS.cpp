@@ -17,7 +17,7 @@ const QString BaiduTTS::m_sTTSGetUrl("http://tsn.baidu.com/text2audio?tex=%1&lan
 
 const QString BaiduTTS::m_sConfigFile("./baidu_tts.config");
 
-BaiduTTS::BaiduTTS()
+BaiduTTS::BaiduTTS(const char* des_path)
 	: m_sAppid("7739437")
 	, m_sAPIKey("SDLeGToa0DIzrOVgqGgr47je")
 	, m_sSecretKey("2642e0ebdfd8df5580d68c63626c1778")
@@ -27,13 +27,16 @@ BaiduTTS::BaiduTTS()
 	, m_desPath(nullptr)
 	, m_pOfstream(nullptr)
 {
+	m_desPath = des_path;
+	m_pOfstream = new fstream(m_desPath, ofstream::binary | ofstream::out | ofstream::trunc);
+
 	if (!loadAuthFromCache())
 		doAuth();
 }
 
 BaiduTTS::~BaiduTTS()
 {
-	m_manager->deleteLater();
+	delete m_manager;
 	delete m_pOfstream;
 }
 
@@ -59,17 +62,12 @@ int BaiduTTS::doAuth()
 	return 0;
 }
 
-int BaiduTTS::tts(const char* src_text, const char* des_path)
+int BaiduTTS::tts(const char* src_text)
 {
-	if (m_nState != AUTH_PASSED)
+	if (m_nState != AUTH_PASSED || m_pOfstream == nullptr || !*m_pOfstream)
 		return -1;
 
 	m_srcTest = src_text;
-	m_desPath = des_path;
-
-	m_pOfstream = new fstream(m_desPath, ofstream::binary | ofstream::out);
-	if (!*m_pOfstream)
-		return -1;
 
 	QEventLoop evtLoop;
 	connect(m_manager, SIGNAL(finished(QNetworkReply*)), &evtLoop, SLOT(quit()));

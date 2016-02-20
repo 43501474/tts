@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
+#include "Player.h"
 #include <QMessageBox>
 #include <QFileDialog>
 #include <QFile>
@@ -9,30 +10,29 @@
 #include <QTextStream>
 
 MainWindow::MainWindow(QWidget *parent) :
-    QMainWindow(parent),
-    ui(new Ui::MainWindow)
+    QMainWindow(parent)
+    ,ui(new Ui::MainWindow)
+	,m_pPlayer(nullptr)
 {
     ui->setupUi(this);
 }
 
 MainWindow::~MainWindow()
 {
+	delete m_pPlayer;
     delete ui;
 }
 
 void MainWindow::on_action_Open_triggered()
 {
     QString sFileName = QFileDialog::getOpenFileName(this, "Open file", ".", "Text files (*.txt)");
-    QFile f(sFileName);
-    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
-        return;
-    QTextStream in(&f);
-    in.setCodec("GB18030");
-
-    m_sFileContent = in.readAll();
+	//QString sFileName = "test.txt";
+	delete m_pPlayer;
+	m_pPlayer = new CPlayer(sFileName);
     QTextEdit* pTextEdit = dynamic_cast<QTextEdit*>(ui->centralContent);
     if (pTextEdit == nullptr)
         return;
 
-    pTextEdit->setText(m_sFileContent.left(10000)); // TODO: encoding things
+    //pTextEdit->setText(m_pPlayer->fileContent());
+	m_pPlayer->play();
 }

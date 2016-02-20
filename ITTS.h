@@ -3,6 +3,6 @@
 class ITTS
 {
 public:
-    virtual int tts(const char* src_text, const char* des_path) = 0;
+    virtual int tts(const char* src_text) = 0;
 };
 

@@ -7,6 +7,7 @@ namespace Ui {
 class MainWindow;
 }
 
+class CPlayer;
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -21,7 +22,7 @@ private slots:
 private:
     Ui::MainWindow *ui;
 
-    QString m_sFileContent;
+	CPlayer* m_pPlayer;
 };
 
 #endif // MAINWINDOW_H

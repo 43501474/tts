@@ -13,11 +13,11 @@ class BaiduTTS : public QObject, public ITTS
 	Q_OBJECT
 
 public:
-	BaiduTTS();
+	BaiduTTS(const char* des_path);
 	~BaiduTTS();
 
 	int doAuth();
-	virtual int tts(const char* src_text, const char* des_path) override;
+	virtual int tts(const char* src_text) override;
 
 public slots:
 	//bool slotReadyRead();

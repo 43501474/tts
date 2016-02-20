@@ -50,10 +50,15 @@ wave_pcm_hdr default_wav_hdr =
 };
 
 
-XunFeiTTS::XunFeiTTS()
+XunFeiTTS::XunFeiTTS(const char* des_path)
     :m_bInit(false)
     ,m_sessionID(nullptr)
+	,m_pOut(nullptr)
 {
+	m_pOut = new ofstream(des_path, ofstream::app | ofstream::binary);
+	if (!*m_pOut)
+		return;
+
     int         ret                  = MSP_SUCCESS;
     const char* login_params         = "appid = 56a77ead, work_dir = .";//登录参数,appid与msc库绑定,请勿随意改动
     /* 用户登录 */
@@ -77,26 +82,23 @@ XunFeiTTS::XunFeiTTS()
 
 XunFeiTTS::~XunFeiTTS()
 {
+	delete m_pOut;
     QTTSSessionEnd(m_sessionID, "Normal");
     MSPLogout(); //退出登录
 }
 
-int XunFeiTTS::tts(const char* src_text, const char* des_path)
+// TODO: 头部应该只写一次, 所以放在构造函数和析构函数中做合适一些
+int XunFeiTTS::tts(const char* src_text)
 {
-    if (false == m_bInit)
+    if (false == m_bInit || m_pOut == nullptr || !*m_pOut)
     {
         qDebug() << "TTS init failed";
         return -1;
     }
 
-    wave_pcm_hdr wav_hdr      = default_wav_hdr;
-    ofstream out(des_path, ofstream::out|ofstream::binary);
-    if (!out)
-    {
-        qDebug() << "Open file failed: " << des_path;
-        return -1;
-    }
-    out.write(reinterpret_cast<const char*>(&wav_hdr), sizeof(wav_hdr)); //添加wav音频头，使用采样率为16000
+	wave_pcm_hdr wav_hdr = default_wav_hdr;
+	m_pOut->write(reinterpret_cast<const char*>(&wav_hdr), sizeof(wav_hdr)); //添加wav音频头，使用采样率为16000
+
 
     /* 文本合成 */
     int ret = QTTSTextPut(m_sessionID, src_text, (unsigned int)strlen(src_text), NULL);
@@ -116,7 +118,7 @@ int XunFeiTTS::tts(const char* src_text, const char* des_path)
             break;
         if (NULL != data)
         {
-            out.write(reinterpret_cast<const char*>(data), audio_len);
+            m_pOut->write(reinterpret_cast<const char*>(data), audio_len);
             wav_hdr.data_size += audio_len; //计算data_size大小
         }
         if (MSP_TTS_FLAG_DATA_END == synth_status)
@@ -133,10 +135,10 @@ int XunFeiTTS::tts(const char* src_text, const char* des_path)
     wav_hdr.size_8 += wav_hdr.data_size + (sizeof(wav_hdr) - 8);
 
     /* 将修正过的数据写回文件头部,音频文件为wav格式 */
-    out.seekp(4);
-    out.write(reinterpret_cast<const char*>(&wav_hdr.size_8),sizeof(wav_hdr.size_8)); //写入size_8的值
-    out.seekp(40); //将文件指针偏移到存储data_size值的位置
-    out.write(reinterpret_cast<const char*>(&wav_hdr.data_size),sizeof(wav_hdr.data_size)); //写入data_size的值
+    m_pOut->seekp(4);
+	m_pOut->write(reinterpret_cast<const char*>(&wav_hdr.size_8),sizeof(wav_hdr.size_8)); //写入size_8的值
+	m_pOut->seekp(40); //将文件指针偏移到存储data_size值的位置
+	m_pOut->write(reinterpret_cast<const char*>(&wav_hdr.data_size),sizeof(wav_hdr.data_size)); //写入data_size的值
 
     return 0;
 }
